@@ -1,5 +1,6 @@
-FROM debian:jessie
+FROM debian:buster
 
+# Set up host tools
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y apt-utils \
  && DEBIAN_FRONTEND=noninteractive dpkg-reconfigure apt-utils \
@@ -13,47 +14,84 @@ RUN apt-get update \
         make \
         runit \
         sudo \
-        xz-utils
+        pkg-config \
+        xz-utils \
+        wget \
+        python \
+        build-essential \
+        qemu \
+        qemu-user-static \
+        binfmt-support
 
 # Here is where we hardcode the toolchain decision.
 ENV HOST=arm-linux-gnueabihf \
     TOOLCHAIN=gcc-linaro-arm-linux-gnueabihf-raspbian-x64 \
     RPXC_ROOT=/rpxc
 
-#    TOOLCHAIN=arm-rpi-4.9.3-linux-gnueabihf \
-#    TOOLCHAIN=gcc-linaro-arm-linux-gnueabihf-raspbian-x64 \
-
 WORKDIR $RPXC_ROOT
 RUN curl -L https://github.com/raspberrypi/tools/tarball/master \
-  | tar --wildcards --strip-components 3 -xzf - "*/arm-bcm2708/$TOOLCHAIN/"
+  | tar --wildcards --strip-components 3 -xzf - "*/arm-bcm2708/$TOOLCHAIN/" "*/${HOST}-pkg-config"
 
 ENV ARCH=arm \
     CROSS_COMPILE=$RPXC_ROOT/bin/$HOST- \
     PATH=$RPXC_ROOT/bin:$PATH \
-    QEMU_PATH=/usr/bin/qemu-arm-static \
-    QEMU_EXECVE=1 \
-    SYSROOT=$RPXC_ROOT/sysroot
+    SYSROOT=$RPXC_ROOT/sysroot \
+    WORKSPACE=/workspace
+
 
 WORKDIR $SYSROOT
-RUN curl -Ls https://github.com/sdhibit/docker-rpi-raspbian/raw/master/raspbian.2015.05.05.tar.xz \
-    | tar -xJf - \
- && curl -Ls https://github.com/resin-io-projects/armv7hf-debian-qemu/raw/master/bin/qemu-arm-static \
-    > $SYSROOT/$QEMU_PATH \
- && chmod +x $SYSROOT/$QEMU_PATH \
- && mkdir -p $SYSROOT/build \
- && chroot $SYSROOT $QEMU_PATH /bin/sh -c '\
-        echo "deb http://archive.raspbian.org/raspbian jessie firmware" \
-            >> /etc/apt/sources.list \
+
+#download and unpack the RPI disk image
+RUN wget https://downloads.raspberrypi.org/raspbian_lite/archive/2019-09-30-15:24/root.tar.xz 
+RUN tar -xJf root.tar.xz 
+
+# chroot into the rpi image and use qemu to update and install extra packages
+RUN chroot $SYSROOT /bin/sh -c '\
+        uname -a \
+        && echo "deb http://archive.raspbian.org/raspbian buster main contrib non-free rpi firmware\ndeb-src http://archive.raspbian.org/raspbian/ buster main contrib non-free rpi firmware"  >> /etc/apt/sources.list \
         && apt-get update \
         && DEBIAN_FRONTEND=noninteractive apt-get install -y apt-utils \
         && DEBIAN_FRONTEND=noninteractive dpkg-reconfigure apt-utils \
-        && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                libc6-dev \
-                symlinks \
-        && symlinks -cors /'
+        && DEBIAN_FRONTEND=noninteractive apt-get -y update \
+        && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade \
+        && DEBIAN_FRONTEND=noninteractive apt-get -y build-dep qt4-x11 \
+        && DEBIAN_FRONTEND=noninteractive apt-get -y build-dep libqt5gui5 \
+        && DEBIAN_FRONTEND=noninteractive apt-get -y install libudev-dev libinput-dev libts-dev libxcb-xinerama0-dev libxcb-xinerama0'
 
-COPY image/ /
 
-WORKDIR /build
-ENTRYPOINT [ "/rpxc/entrypoint.sh" ]
+WORKDIR $RPXC_ROOT
+
+#fix symlincs for cross compiling
+RUN wget https://raw.githubusercontent.com/Kukkimonsuta/rpi-buildqt/master/scripts/utils/sysroot-relativelinks.py \
+    && chmod +x sysroot-relativelinks.py \
+    && ./sysroot-relativelinks.py sysroot
+
+WORKDIR $WORKSPACE
+
+# Get Qt
+RUN git clone https://code.qt.io/qt/qt5.git qtsource \
+    && cd qtsource \
+    && git checkout 5.12.6 \
+    && perl init-repository --module-subset=default,-qtwebkit,-qtwebkit-examples,-qtwebengine,-qt3d,-qtandroidextras,-qtwinextras,-qtmacextras,-qtlocation,-qtscript \
+    && cd -
+
+#Apply patch to qxcbeglwindow fix for QTBUG-75328
+COPY patches .
+RUN cd qtsource/qtbase && git apply $WORKSPACE/qxcbeglwindow.diff && cd -
+
+# Configure Qt
+RUN cd qtsource \
+    && ./configure -device linux-rasp-pi3-g++ \
+        -device-option CROSS_COMPILE=$CROSS_COMPILE \
+        -sysroot $SYSROOT -prefix /opt/qt5 -extprefix /opt/qt5 \
+        -release -opengl es2 -opensource -static -no-use-gold-linker -confirm-license \
+        -nomake examples -nomake tests \
+        -skip location -skip script -v \
+    && cd -
+
+# Build Qt
+RUN cd qtsource \
+    && make -j12 \
+    && make install \
+    && cd -
+

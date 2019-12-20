@@ -1,0 +1,13 @@
+diff --git a/src/plugins/platforms/xcb/gl_integrations/xcb_egl/qxcbeglwindow.cpp b/src/plugins/platforms/xcb/gl_integrations/xcb_egl/qxcbeglwindow.cpp
+index 65beac227c..b82cc0f5af 100644
+--- a/src/plugins/platforms/xcb/gl_integrations/xcb_egl/qxcbeglwindow.cpp
++++ b/src/plugins/platforms/xcb/gl_integrations/xcb_egl/qxcbeglwindow.cpp
+@@ -93,7 +93,7 @@ void QXcbEglWindow::create()
+ {
+     QXcbWindow::create();
+ 
+-    m_surface = eglCreateWindowSurface(m_glIntegration->eglDisplay(), m_config, m_window, 0);
++    m_surface = eglCreateWindowSurface(m_glIntegration->eglDisplay(), m_config, (void*)m_window, 0);
+ }
+ 
+ QT_END_NAMESPACE
