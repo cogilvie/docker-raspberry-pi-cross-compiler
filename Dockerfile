@@ -72,7 +72,7 @@ WORKDIR $WORKSPACE
 RUN git clone https://code.qt.io/qt/qt5.git qtsource \
     && cd qtsource \
     && git checkout 5.12.6 \
-    && perl init-repository --module-subset=default,-qtwebkit,-qtwebkit-examples,-qtwebengine,-qt3d,-qtandroidextras,-qtwinextras,-qtmacextras,-qtlocation,-qtscript \
+    && perl init-repository --module-subset=default,qtvirtualkeyboard,-qtwebkit,-qtwebkit-examples,-qtwebengine,-qt3d,-qtandroidextras,-qtwinextras,-qtmacextras,-qtlocation,-qtscript \
     && cd -
 
 #Apply patch to qxcbeglwindow fix for QTBUG-75328
